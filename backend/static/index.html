@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Smart Expense Splitter — Owner:Devashree</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; max-width:900px; margin:24px auto; padding:12px; }
+  h1 { font-size:20px; margin-bottom:8px; }
+  .card { border:1px solid #ddd; padding:12px; border-radius:8px; margin-bottom:12px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);}
+  label { display:block; margin-top:6px; font-size:13px; }
+  input, select, textarea { width:100%; padding:8px; margin-top:4px; box-sizing:border-box; border-radius:6px; border:1px solid #ccc; }
+  .row { display:flex; gap:10px; }
+  .row > * { flex:1; }
+  button { padding:8px 12px; border-radius:6px; border:0; background:#2563eb; color:#fff; cursor:pointer; margin-top:8px; }
+  button.secondary { background:#6b7280; }
+  pre { background:#f8fafc; padding:10px; border-radius:6px; overflow:auto; }
+  .muted { color:#6b7280; font-size:13px; }
+  .small { font-size:13px; }
+
+  /* Modal overlay */
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:9999; }
+  .modal { background:#fff; width:90%; max-width:640px; border-radius:8px; padding:16px; box-shadow:0 8px 32px rgba(0,0,0,0.2); }
+  .modal header { font-weight:600; font-size:16px; margin-bottom:8px; }
+  .modal .modal-body { max-height:60vh; overflow:auto; margin-bottom:10px; }
+  .modal .modal-actions { display:flex; gap:8px; justify-content:flex-end; }
+  .modal .btn-danger { background:#ef4444; }
+  .modal .btn-cancel { background:#6b7280; }
+  .hidden { display:none !important; }
+</style>
+
+</head>
+<body>
+  <h1>Smart Expense Splitter</h1>
+
+  <div class="card">
+    <strong>Add user</strong>
+    <label>Name</label>
+    <input id="user-name" placeholder="e.g. Alice" />
+    <button id="btn-add-user">Add user</button>
+    <div id="add-user-result" class="muted small"></div>
+  </div>
+
+  <div class="card">
+    <strong>Users</strong>
+    <div id="users-list" class="muted small">Loading users...</div>
+    <button id="btn-refresh-users" class="secondary">Refresh users</button>
+  </div>
+
+  <div class="card">
+    <strong>Add expense</strong>
+    <label>Payer (who paid)</label>
+    <select id="payer-select"></select>
+
+    <label>Amount</label>
+    <input id="expense-amount" type="number" placeholder="e.g. 900" />
+
+    <label>Description</label>
+    <input id="expense-desc" placeholder="Dinner, taxi..." />
+
+    <label>Involved (use Ctrl/Cmd to select multiple)</label>
+    <select id="involved-select" multiple size="4" style="height:90px"></select>
+
+    <div style="margin-top:8px;">
+      <label><input id="equal-split" type="checkbox" checked /> Split equally</label>
+    </div>
+
+    <label id="custom-shares-label" style="display:none">Custom shares (comma separated in same order)</label>
+    <input id="custom-shares" style="display:none" placeholder="300,300,300" />
+
+    <button id="btn-add-expense">Add expense</button>
+    <div id="add-expense-result" class="muted small"></div>
+  </div>
+
+  <div class="card">
+    <strong>Summary</strong>
+    <button id="btn-summary">Show summary</button>
+    <button id="btn-settle" class="secondary">Show settle transactions</button>
+    <div id="summary-area" style="margin-top:10px"></div>
+  </div>
+
+  <script>
+document.addEventListener('DOMContentLoaded', function() {
+
+const API_BASE = '';
+
+// ---------- helper api call ----------
+async function callApi(path, method='GET', body=null) {
+  const opts = { method, headers: {} };
+  if (body !== null) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(API_BASE + path, opts);
+  if (!res.ok) {
+    const text = await res.text().catch(()=>null);
+    throw new Error('API error: ' + res.status + ' ' + (text || res.statusText));
+  }
+  return res.json().catch(()=>null);
+}
+
+// ---------- UI elements ----------
+const usersListEl = document.getElementById('users-list');
+const payerSelect = document.getElementById('payer-select');
+const involvedSelect = document.getElementById('involved-select');
+const btnAddUser = document.getElementById('btn-add-user');
+const btnAddExpense = document.getElementById('btn-add-expense');
+const btnSummary = document.getElementById('btn-summary');
+const btnSettle = document.getElementById('btn-settle');
+const addUserResult = document.getElementById('add-user-result');
+const addExpenseResult = document.getElementById('add-expense-result');
+const equalSplitCheck = document.getElementById('equal-split');
+const customSharesInput = document.getElementById('custom-shares');
+const customSharesLabel = document.getElementById('custom-shares-label');
+const summaryArea = document.getElementById('summary-area');
+
+// modal elements (user)
+const userModalBackdrop = document.getElementById('userModalBackdrop');
+const modalUserName = document.getElementById('modal-user-name');
+const modalUserId = document.getElementById('modal-user-id');
+const modalUserSave = document.getElementById('modal-user-save');
+const modalUserCancel = document.getElementById('modal-user-cancel');
+
+// modal elements (expense)
+const expenseModalBackdrop = document.getElementById('expenseModalBackdrop');
+const modalExpId = document.getElementById('modal-exp-id');
+const modalExpAmount = document.getElementById('modal-exp-amount');
+const modalExpDesc = document.getElementById('modal-exp-desc');
+const modalExpInvolved = document.getElementById('modal-exp-involved');
+const modalExpShares = document.getElementById('modal-exp-shares');
+const modalExpPaidBy = document.getElementById('modal-exp-paidby');
+const modalExpSave = document.getElementById('modal-exp-save');
+const modalExpCancel = document.getElementById('modal-exp-cancel');
+
+// ---------- helpers to show/hide modals ----------
+function openModal(el) { el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); }
+function closeModal(el) { el.style.display = 'none'; el.setAttribute('aria-hidden','true'); }
+
+// ---------- load users ----------
+async function loadUsers() {
+  try {
+    const data = await callApi('/users', 'GET');
+    usersListEl.innerHTML = '';
+    if (!data || data.length === 0) {
+      usersListEl.textContent = 'No users yet.';
+      payerSelect.innerHTML = '';
+      involvedSelect.innerHTML = '';
+      return;
+    }
+    // show list with edit/delete
+    const container = document.createElement('div');
+    data.forEach(u => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.alignItems = 'center';
+      row.style.marginBottom = '6px';
+      const label = document.createElement('div');
+      label.style.flex = '1';
+      label.textContent = `${u.user_id}: ${u.name}`;
+      row.appendChild(label);
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Edit';
+      editBtn.className = 'secondary';
+      editBtn.onclick = ()=> openEditUserModal(u.user_id, u.name);
+      row.appendChild(editBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = ()=> deleteUser(u.user_id);
+      row.appendChild(delBtn);
+
+      container.appendChild(row);
+    });
+    usersListEl.appendChild(container);
+
+    // fill selects
+    payerSelect.innerHTML = data.map(u => `<option value="${u.user_id}">${u.name} (${u.user_id})</option>`).join('');
+    involvedSelect.innerHTML = data.map(u => `<option value="${u.user_id}">${u.name} (${u.user_id})</option>`).join('');
+  } catch (err) {
+    usersListEl.textContent = 'Error loading users: ' + err.message;
+  }
+}
+
+// ---------- add user ----------
+btnAddUser.addEventListener('click', async () => {
+  const name = document.getElementById('user-name').value.trim();
+  if (!name) { addUserResult.textContent = 'Enter a name'; return; }
+  addUserResult.textContent = 'Adding...';
+  try {
+    const res = await callApi('/users', 'POST', { name });
+    addUserResult.textContent = `Added ${res.name} (id ${res.user_id})`;
+    document.getElementById('user-name').value = '';
+    await loadUsers();
+  } catch (err) {
+    addUserResult.textContent = 'Error: ' + err.message;
+  }
+});
+
+// ---------- delete user ----------
+async function deleteUser(user_id) {
+  if (!confirm('Delete user and related data? This cannot be undone.')) return;
+  try {
+    await callApi(`/users/${user_id}`, 'DELETE');
+    await loadUsers();
+    await loadExpenses();
+  } catch (err) {
+    alert('Error deleting user: ' + err.message);
+  }
+}
+
+// ---------- open edit user modal ----------
+function openEditUserModal(user_id, currentName) {
+  modalUserId.value = user_id;
+  modalUserName.value = currentName;
+  openModal(userModalBackdrop);
+  modalUserName.focus();
+}
+
+// modal save/cancel handlers
+modalUserCancel.addEventListener('click', ()=> closeModal(userModalBackdrop));
+modalUserSave.addEventListener('click', async () => {
+  const uid = Number(modalUserId.value);
+  const newName = modalUserName.value.trim();
+  if (!newName) { alert('Name required'); return; }
+  try {
+    await callApi(`/users/${uid}`, 'PUT', { name: newName });
+    closeModal(userModalBackdrop);
+    await loadUsers();
+  } catch (err) {
+    alert('Error updating user: ' + err.message);
+  }
+});
+
+// ---------- expenses ----------
+
+equalSplitCheck.addEventListener('change', () => {
+  const checked = equalSplitCheck.checked;
+  customSharesInput.style.display = checked ? 'none' : 'block';
+  customSharesLabel.style.display = checked ? 'none' : 'block';
+});
+
+// add expense
+btnAddExpense.addEventListener('click', async () => {
+  addExpenseResult.textContent = '';
+  const paid_by = Number(payerSelect.value);
+  const amount = Number(document.getElementById('expense-amount').value);
+  const description = document.getElementById('expense-desc').value || '';
+  const selected = Array.from(involvedSelect.selectedOptions).map(o => Number(o.value));
+  if (!paid_by || !amount || selected.length === 0) { addExpenseResult.textContent = 'Fill payer, amount and involved users'; return; }
+
+  let body;
+  if (equalSplitCheck.checked) {
+    body = { amount, paid_by, description, involved: selected };
+  } else {
+    const sharesText = customSharesInput.value.trim();
+    if (!sharesText) { addExpenseResult.textContent = 'Enter custom shares'; return; }
+    const parts = sharesText.split(',').map(s => Number(s.trim()));
+    if (parts.length !== selected.length) { addExpenseResult.textContent = 'Shares count must match involved count'; return; }
+    body = { amount, paid_by, description, involved: selected, shares: parts };
+  }
+
+  addExpenseResult.textContent = 'Adding...';
+  try {
+    const res = await callApi('/expenses', 'POST', body);
+    addExpenseResult.textContent = 'Expense added (id ' + res.expense_id + ')';
+    document.getElementById('expense-amount').value = '';
+    document.getElementById('expense-desc').value = '';
+    customSharesInput.value = '';
+    await loadUsers();
+    await loadExpenses();
+  } catch (err) {
+    addExpenseResult.textContent = 'Error: ' + err.message;
+  }
+});
+
+// load expenses (with edit/delete)
+async function loadExpenses() {
+  const area = document.getElementById('summary-area');
+  area.innerHTML = '<div class="muted">Loading expenses...</div>';
+  try {
+    const expenses = await callApi('/expenses', 'GET');
+    if (!expenses || expenses.length === 0) { area.innerHTML = '<div class="muted">No expenses yet</div>'; return; }
+    let html = '<table style="width:100%;border-collapse:collapse"><thead><tr><th>Id</th><th>Payer</th><th>Amount</th><th>Description</th><th>Splits</th><th></th></tr></thead><tbody>';
+    expenses.forEach(e => {
+      const splitsText = e.splits.map(s=>`${s.user_id}:${s.share}`).join(', ');
+      html += `<tr id="exp-${e.expense_id}"><td>${e.expense_id}</td><td>${e.paid_by}</td><td>${e.amount}</td><td>${e.description}</td><td>${splitsText}</td><td>
+        <button onclick="openEditExpenseModal(${e.expense_id})" class="secondary">Edit</button>
+        <button onclick="deleteExpense(${e.expense_id})">Delete</button>
+      </td></tr>`;
+    });
+    html += '</tbody></table>';
+    area.innerHTML = html;
+  } catch (err) {
+    area.innerHTML = 'Error loading expenses: ' + err.message;
+  }
+}
+
+// ---------- open edit expense modal ----------
+window.openEditExpenseModal = async function(expense_id) {
+  try {
+    const expenses = await callApi('/expenses', 'GET');
+    const e = expenses.find(x=>x.expense_id === expense_id);
+    if (!e) { alert('Expense not found'); return; }
+
+    modalExpId.value = e.expense_id;
+    modalExpAmount.value = e.amount;
+    modalExpDesc.value = e.description || '';
+    modalExpInvolved.value = e.splits.map(s=>s.user_id).join(',');
+    modalExpShares.value = e.splits.map(s=>s.share).join(',');
+    modalExpPaidBy.value = e.paid_by;
+
+    openModal(expenseModalBackdrop);
+    modalExpAmount.focus();
+  } catch (err) {
+    alert('Error preparing edit: ' + err.message);
+  }
+};
+
+// save expense from modal
+modalExpSave.addEventListener('click', async () => {
+  const expense_id = Number(modalExpId.value);
+  const amount = Number(modalExpAmount.value);
+  const description = modalExpDesc.value || '';
+  const involved = modalExpInvolved.value.split(',').map(s=>Number(s.trim())).filter(Boolean);
+  const sharesRaw = modalExpShares.value.trim();
+  const shares = sharesRaw ? sharesRaw.split(',').map(s=>Number(s.trim())) : null;
+  const paid_by = Number(modalExpPaidBy.value);
+  if (!expense_id || !amount || involved.length === 0 || !paid_by) { alert('Please fill required fields'); return; }
+
+  const body = { amount, paid_by, description, involved, shares };
+  try {
+    await callApi(`/expenses/${expense_id}`, 'PUT', body);
+    closeModal(expenseModalBackdrop);
+    await loadExpenses();
+    await loadUsers();
+  } catch (err) {
+    alert('Error saving expense: ' + err.message);
+  }
+});
+
+modalExpCancel.addEventListener('click', ()=> closeModal(expenseModalBackdrop));
+
+// delete expense
+window.deleteExpense = async function(expense_id) {
+  if (!confirm('Delete this expense?')) return;
+  try {
+    await callApi(`/expenses/${expense_id}`, 'DELETE');
+    await loadExpenses();
+    await loadUsers();
+  } catch (err) {
+    alert('Error deleting expense: ' + err.message);
+  }
+};
+
+// ---------- summary & settle ----------
+btnSummary.addEventListener('click', async () => {
+  try {
+    const totals = await callApi('/summary', 'GET');
+    const keys = Object.keys(totals || {});
+    if (!keys.length) { summaryArea.innerHTML = '<div class="muted">No data yet</div>'; return; }
+    let html = '<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">User</th><th>Paid</th><th>Share</th><th>Balance</th></tr></thead><tbody>';
+    keys.forEach(k => {
+      const t = totals[k];
+      html += `<tr><td>${t.name} (${t.user_id})</td><td>${t.paid}</td><td>${t.share}</td><td>${t.balance}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    summaryArea.innerHTML = html;
+  } catch (err) {
+    summaryArea.innerHTML = 'Error: ' + err.message;
+  }
+});
+
+btnSettle.addEventListener('click', async () => {
+  try {
+    const txns = await callApi('/settle', 'GET');
+    if (!txns || txns.length === 0) { summaryArea.innerHTML = '<div class="muted">No settlements needed.</div>'; return; }
+    let html = '<ul>';
+    txns.forEach(t => {
+      html += `<li>${t.from_name || t.from} pays ${t.to_name || t.to}: ${t.amount}</li>`;
+    });
+    html += '</ul>';
+    summaryArea.innerHTML = html;
+  } catch (err) {
+    summaryArea.innerHTML = 'Error: ' + err.message;
+  }
+});
+
+// ---------- init ----------
+(async ()=> {
+  await loadUsers();
+  await loadExpenses();
+})();
+}); // end DOMContentLoaded
+</script>
+
+
+<!-- User Edit Modal -->
+<div id="userModalBackdrop" class="modal-backdrop" role="dialog" aria-hidden="true">
+  <div class="modal" role="document" aria-labelledby="userModalTitle">
+    <header id="userModalTitle">Edit User</header>
+    <div class="modal-body">
+      <label for="modal-user-name">Name</label>
+      <input id="modal-user-name" type="text" />
+      <input id="modal-user-id" type="hidden" />
+    </div>
+    <div class="modal-actions">
+      <button id="modal-user-save">Save</button>
+      <button id="modal-user-cancel" class="btn-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Expense Edit Modal -->
+<div id="expenseModalBackdrop" class="modal-backdrop" role="dialog" aria-hidden="true">
+  <div class="modal" role="document" aria-labelledby="expenseModalTitle">
+    <header id="expenseModalTitle">Edit Expense</header>
+    <div class="modal-body">
+      <label for="modal-exp-id">Expense ID</label>
+      <input id="modal-exp-id" type="text" readonly />
+
+      <label for="modal-exp-amount">Amount</label>
+      <input id="modal-exp-amount" type="number" />
+
+      <label for="modal-exp-desc">Description</label>
+      <input id="modal-exp-desc" type="text" />
+
+      <label for="modal-exp-involved">Involved (comma separated ids)</label>
+      <input id="modal-exp-involved" type="text" placeholder="1,2,3" />
+
+      <label for="modal-exp-shares">Custom shares (comma separated) — leave empty for equal split</label>
+      <input id="modal-exp-shares" type="text" placeholder="300,300,300" />
+
+      <label for="modal-exp-paidby">Paid by (user id)</label>
+      <input id="modal-exp-paidby" type="number" />
+    </div>
+    <div class="modal-actions">
+      <button id="modal-exp-save">Save</button>
+      <button id="modal-exp-cancel" class="btn-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
