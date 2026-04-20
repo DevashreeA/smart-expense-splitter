@@ -1,6 +1,6 @@
 # backend/calculations.py
 from backend.database import get_connection
-from backend.collections import defaultdict
+from collections import defaultdict
 
 def get_totals():
     """
