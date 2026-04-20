@@ -5,8 +5,8 @@ from flask_cors import CORS
 from datetime import datetime
 
 # use relative imports
-from database import create_tables, get_connection
-from calculations import get_totals, simplify_debts
+from backend.database import create_tables, get_connection
+from backend.calculations import get_totals, simplify_debts
 
 app = Flask(__name__, template_folder="templates")
 CORS(app)
