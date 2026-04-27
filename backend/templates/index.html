@@ -58,6 +58,15 @@
     <label>Description</label>
     <input id="expense-desc" placeholder="Dinner, taxi..." />
 
+    <label>Category</label>
+    <input id="expense-category" placeholder="Food, Travel..." />
+
+    <label>Date</label>
+    <input id="expense-date" type="date" />
+
+    <label>Group ID (optional)</label>
+    <input id="expense-group-id" type="number" placeholder="Leave empty for non-group expense" />
+
     <label>Involved (use Ctrl/Cmd to select multiple)</label>
     <select id="involved-select" multiple size="4" style="height:90px"></select>
 
@@ -86,7 +95,7 @@ const API_BASE = '';
 
 // ---------- helper api call ----------
 async function callApi(path, method='GET', body=null) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: {}, credentials: 'include' };
   if (body !== null) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -246,18 +255,22 @@ btnAddExpense.addEventListener('click', async () => {
   const paid_by = Number(payerSelect.value);
   const amount = Number(document.getElementById('expense-amount').value);
   const description = document.getElementById('expense-desc').value || '';
+  const category = document.getElementById('expense-category').value || 'General';
+  const date = document.getElementById('expense-date').value || null;
+  const group_id_raw = document.getElementById('expense-group-id').value;
+  const group_id = group_id_raw ? Number(group_id_raw) : null;
   const selected = Array.from(involvedSelect.selectedOptions).map(o => Number(o.value));
   if (!paid_by || !amount || selected.length === 0) { addExpenseResult.textContent = 'Fill payer, amount and involved users'; return; }
 
   let body;
   if (equalSplitCheck.checked) {
-    body = { amount, paid_by, description, involved: selected };
+    body = { amount, paid_by, description, category, date, group_id, involved: selected };
   } else {
     const sharesText = customSharesInput.value.trim();
     if (!sharesText) { addExpenseResult.textContent = 'Enter custom shares'; return; }
     const parts = sharesText.split(',').map(s => Number(s.trim()));
     if (parts.length !== selected.length) { addExpenseResult.textContent = 'Shares count must match involved count'; return; }
-    body = { amount, paid_by, description, involved: selected, shares: parts };
+    body = { amount, paid_by, description, category, date, group_id, involved: selected, shares: parts };
   }
 
   addExpenseResult.textContent = 'Adding...';
@@ -266,6 +279,8 @@ btnAddExpense.addEventListener('click', async () => {
     addExpenseResult.textContent = 'Expense added (id ' + res.expense_id + ')';
     document.getElementById('expense-amount').value = '';
     document.getElementById('expense-desc').value = '';
+    document.getElementById('expense-category').value = '';
+    document.getElementById('expense-group-id').value = '';
     customSharesInput.value = '';
     await loadUsers();
     await loadExpenses();
@@ -388,6 +403,9 @@ btnSettle.addEventListener('click', async () => {
 
 // ---------- init ----------
 (async ()=> {
+  const today = new Date().toISOString().slice(0, 10);
+  const expenseDate = document.getElementById('expense-date');
+  if (expenseDate) expenseDate.value = today;
   await loadUsers();
   await loadExpenses();
 })();
