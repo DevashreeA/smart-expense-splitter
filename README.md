@@ -25,4 +25,11 @@ A web application to manage group expenses and split bills efficiently among mul
 
 ---
 
+## 🤖 AI Expense Insights
+- New backend endpoint: `POST /ai/expense-insights`
+- Sends user expense records to the OpenAI API for smart suggestions
+- Requires `OPENAI_API_KEY` in environment variables
+
+---
+
 ## 📂 Project Structure
