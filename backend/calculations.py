@@ -1,5 +1,5 @@
 # backend/calculations.py
-from database import get_connection
+from backend.database import get_connection
 from collections import defaultdict
 
 def get_totals():

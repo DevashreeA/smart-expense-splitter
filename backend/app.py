@@ -6,8 +6,8 @@ from datetime import datetime
 import hashlib
 
 # use relative imports
-from database import create_tables, get_connection
-from calculations import get_totals, simplify_debts
+from backend.database import create_tables, get_connection
+from backend.calculations import get_totals, simplify_debts
 
 app = Flask(__name__, template_folder="templates")
 app.secret_key = "supersecretkey"
@@ -1128,5 +1128,11 @@ def mark_received():
 
 # ---------------- RUN ---------------- #
 
+import os
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)),
+        debug=False
+    )
